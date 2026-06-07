@@ -21,7 +21,8 @@ from . import patterns as pat
 def _empty(index) -> pd.DataFrame:
     return pd.DataFrame(
         {"side": 0.0, "stop_dist": np.nan, "rr": np.nan,
-         "trail_dist": np.nan, "max_hold": np.nan},
+         "trail_dist": np.nan, "max_hold": np.nan,
+         "partial_rr": np.nan, "partial_frac": np.nan},
         index=index,
     )
 
@@ -165,6 +166,7 @@ def trend_pullback(df: pd.DataFrame, sma_trend: int = 200, rsi_p: int = 4,
                    rsi_buy: float = 30.0, atr_period: int = 14,
                    stop_atr: float = 2.5, trail_atr: float = 4.0,
                    rr: float = float("nan"), max_hold: int = 40,
+                   partial_rr: float = float("nan"), partial_frac: float = float("nan"),
                    pattern_filter: bool = True,
                    allow_short: bool = False) -> pd.DataFrame:
     """Buy dips inside an established up-trend, then ride the trend out with a
@@ -209,6 +211,9 @@ def trend_pullback(df: pd.DataFrame, sma_trend: int = 200, rsi_p: int = 4,
     else:
         out.loc[sel, "trail_dist"] = trail_atr * a   # ride the ATR trail
         out.loc[sel, "rr"] = np.nan
+    if np.isfinite(partial_rr) and np.isfinite(partial_frac):
+        out.loc[sel, "partial_rr"] = partial_rr      # scale out part at partial_rr R
+        out.loc[sel, "partial_frac"] = partial_frac
     return out
 
 

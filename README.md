@@ -70,6 +70,40 @@ points = **~$3,000 risk per single MNQ contract**. That means:
 - To chase higher returns, raise `--risk` — but drawdown scales with it. Don't
   oversize; that is how the 90% blow up.
 
+## Partial profit-taking (`--partial`)
+```bash
+python -m mnq.cli plan --partial --equity 200000
+```
+Scales out **50% at 2R**, moves the stop to **breakeven**, and trails the rest.
+Backtest effect (25 yr): **green months 47% → 52%**, win rate **45% → 53%**,
+**median month −$28 → +$2,076**, higher monthly Sharpe — i.e. it **buys
+consistency**. It does *not* raise total expected profit (≈ +0.24R either way);
+it just books gains in more months and smooths the equity curve. Needs **≥2
+contracts** to split, so it only applies on larger accounts.
+
+## What to realistically expect — the $400-risk example
+You asked: *if it shows up once a week and I risk $400/trade, what's the monthly
+average?* Straight from the 25-year backtest (edge = **+0.24R per trade**, so
+**≈ +$96 per trade** at $400 risk):
+
+| Scenario | Trades/mo | Avg profit/month | Reality check |
+|---|---|---|---|
+| **Once a week (your hypothesis)** | 4.33 | **≈ +$417/mo** | long-run average, very lumpy |
+| **Historical frequency (actual)** | ~0.44 | **≈ +$40–105/mo** | it triggers ~once every 2–3 months, *not* weekly |
+
+**Read the fine print — this is the honest part:**
+- These are **long-run averages with big variance**. Month-to-month at $400 risk
+  ranged roughly **−$774 to +$1,280**, and **~half of active months are red**.
+  The edge shows up over *years*, not in any given month.
+- **$400/trade is not compatible with the daily strategy.** One MNQ contract on
+  the daily timeframe risks ~$3,000 (3×ATR), and you can't trade a fraction of a
+  contract. To truly risk $400/trade you need either a much tighter **intraday**
+  setup (~200-pt stops) or to accept ~$3k risk per daily contract (which scales
+  the numbers above up ~7.5×: ≈ +$720/trade, ≈ **+$3,100/mo if it really came
+  weekly**, ≈ +$300/mo at the realistic frequency).
+- It does **not** come once a week. Honestly, expect long flat stretches and
+  occasional clusters. Anyone quoting you a smooth weekly paycheck is lying.
+
 ## Layout
 ```
 mnq/

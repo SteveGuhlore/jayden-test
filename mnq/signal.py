@@ -31,6 +31,8 @@ class TradePlan:
     exit_mode: str       # "fixed" or "trailing"
     trail_points: float  # ATR trail distance (points), 0 if fixed
     max_hold_bars: float
+    partial_price: float # scale-out price, 0 if disabled
+    partial_frac: float  # fraction to scale out
     note: str
 
     def pretty(self) -> str:
@@ -45,6 +47,17 @@ class TradePlan:
             f"  TAKE PROFIT  : {self.target:,.2f}   ({self.reward_points:,.0f} pts  =  ${self.dollar_reward:,.0f})   [1 : {self.rr:.1f} R]",
             f"  Size         : {self.contracts} MNQ contract(s)",
         ]
+        if self.partial_price > 0 and self.contracts >= 2:
+            n_out = max(1, min(self.contracts - 1, round(self.contracts * self.partial_frac)))
+            lines.append(
+                f"  SCALE OUT    : sell {n_out} of {self.contracts} at {self.partial_price:,.2f} "
+                f"(2R), then move stop to breakeven ({self.entry_ref:,.2f}) and trail the rest."
+            )
+        elif self.partial_price > 0:
+            lines.append(
+                f"  SCALE OUT    : (enabled, but needs >=2 contracts; you have 1 — "
+                f"take the full TP or trail instead)."
+            )
         if self.exit_mode == "trailing" and self.trail_points > 0:
             lines.append(
                 f"  RIDE WINNERS : optional — instead of the fixed TP, trail the stop "
@@ -83,7 +96,7 @@ def latest_signal(
             as_of=str(last_ts), symbol=symbol, side="flat", entry_ref=last_close,
             stop=0, target=0, risk_points=0, reward_points=0, rr=0, contracts=0,
             dollar_risk=0, dollar_reward=0, exit_mode="none", trail_points=0,
-            max_hold_bars=float("nan"),
+            max_hold_bars=float("nan"), partial_price=0, partial_frac=0,
             note=f"'{strategy}' found no qualifying setup on the most recent bar. Wait.",
         )
 
@@ -104,6 +117,11 @@ def latest_signal(
     qty = max(1, min(qty, max_contracts))
     actual_risk = risk_pts * B.POINT_VALUE * qty
 
+    p_rr = float(row.get("partial_rr", np.nan))
+    p_frac = float(row.get("partial_frac", np.nan))
+    partial_price = (B._round_tick(entry + side * p_rr * risk_pts)
+                     if np.isfinite(p_rr) and np.isfinite(p_frac) else 0.0)
+
     note = (f"Strategy={strategy}. Entry is a reference (today's close); place a "
             f"market/stop order near it. Levels are index points; MNQ = ${B.POINT_VALUE}/pt. "
             f"Decision uses only closed-bar data (no lookahead).")
@@ -122,5 +140,7 @@ def latest_signal(
         exit_mode=exit_mode,
         trail_points=trail_dist if np.isfinite(trail_dist) else 0.0,
         max_hold_bars=float(row.get("max_hold", np.nan)),
+        partial_price=partial_price,
+        partial_frac=p_frac if np.isfinite(p_frac) else 0.0,
         note=note,
     )

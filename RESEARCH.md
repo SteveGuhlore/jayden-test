@@ -185,6 +185,14 @@ stop.
   hand you a concrete take-profit number *and* offer the trailing option for
   bigger runners. Both are backtest-validated.
 
+- **Partial scale-out variant (`--partial`):** take 50% off at 2R, move the stop
+  to breakeven, trail the rest. Backtested effect over 25 years: **green months
+  47% → 52%, win rate 45% → 53%, median month −$28 → +$2,076**, higher monthly
+  Sharpe. Crucially, per-trade expectancy is essentially **unchanged (~+0.24R)** —
+  partials do **not** add edge or total profit; they *redistribute* it, banking
+  gains in more calendar months and smoothing the curve. That is a pure
+  **consistency** trade-off, and it requires ≥2 contracts to split.
+
 **Why this is the default.** It is the best compromise between the two edge
 roads, has the lowest drawdown, the best monthly Sharpe, the best out-of-sample
 expectancy, and a trade cadence (~1/week) that matches trading only the best

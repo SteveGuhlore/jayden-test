@@ -46,10 +46,18 @@ def _load(interval, refresh):
     return D.regular_session(df)
 
 
+def _params(strategy, a):
+    """Strategy params, optionally enabling the partial scale-out."""
+    p = dict(DEFAULTS[strategy]["params"])
+    if getattr(a, "partial", False) and strategy == "trend_pullback":
+        p.update(partial_rr=2.0, partial_frac=0.5)
+    return p
+
+
 def cmd_backtest(a):
     d = DEFAULTS[a.strategy]
     price = _load(a.interval or d["interval"], a.refresh)
-    sig = S.REGISTRY[a.strategy](price, **d["params"])
+    sig = S.REGISTRY[a.strategy](price, **_params(a.strategy, a))
     cfg = B.BacktestConfig(start_equity=a.equity, risk_pct=a.risk,
                            intraday=d["intraday"])
     tr, eq = B.run(price, sig, cfg)
@@ -66,7 +74,7 @@ def cmd_backtest(a):
 def cmd_compare(a):
     for name, d in DEFAULTS.items():
         price = _load(d["interval"], a.refresh)
-        sig = S.REGISTRY[name](price, **d["params"])
+        sig = S.REGISTRY[name](price, **_params(name, a))
         cfg = B.BacktestConfig(start_equity=a.equity, risk_pct=a.risk,
                                intraday=d["intraday"])
         tr, eq = B.run(price, sig, cfg)
@@ -107,7 +115,7 @@ def cmd_signal(a):
     except Exception as e:  # noqa: BLE001
         print(f"(could not refresh data: {e}; using cache)")
         price = _load(interval, refresh=False)
-    plan = SG.latest_signal(price, strategy=a.strategy, params=d["params"],
+    plan = SG.latest_signal(price, strategy=a.strategy, params=_params(a.strategy, a),
                             account=a.equity, risk_pct=a.risk)
     print("\n" + plan.pretty())
 
@@ -118,6 +126,9 @@ def main(argv=None):
     common.add_argument("--equity", type=float, default=10_000.0)
     common.add_argument("--risk", type=float, default=0.01, help="fraction of equity risked per trade")
     common.add_argument("--refresh", action="store_true", help="re-download data")
+    common.add_argument("--partial", action="store_true",
+                        help="trend_pullback: scale out 50%% at 2R, move stop to "
+                             "breakeven, trail the rest (more green months, needs >=2 contracts)")
 
     p = argparse.ArgumentParser(description="MNQ pattern trading toolkit", parents=[common])
     sub = p.add_subparsers(dest="cmd", required=True)
