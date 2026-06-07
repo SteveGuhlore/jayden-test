@@ -68,6 +68,11 @@ def run(price: pd.DataFrame, signals: pd.DataFrame, cfg: BacktestConfig | None =
     side_arr = sig["side"].to_numpy(float)
     stopd_arr = sig["stop_dist"].to_numpy(float)
     rr_arr = sig["rr"].to_numpy(float)
+    # Optional columns: trailing-stop distance (points) and max holding bars.
+    trail_arr = (sig["trail_dist"].to_numpy(float) if "trail_dist" in sig
+                 else np.full(len(sig), np.nan))
+    hold_arr = (sig["max_hold"].to_numpy(float) if "max_hold" in sig
+                else np.full(len(sig), np.nan))
 
     slip = cfg.costs.slippage_ticks * TICK
     equity = cfg.start_equity
@@ -81,26 +86,37 @@ def run(price: pd.DataFrame, signals: pd.DataFrame, cfg: BacktestConfig | None =
     for i in range(n - 1):
         # ---- manage an open position on bar i ----
         if in_pos:
-            stop, target, qty, side, entry, risk_pts = (
-                pos["stop"], pos["target"], pos["qty"], pos["side"],
-                pos["entry"], pos["risk_pts"],
-            )
-            exit_price = None
-            if side == 1:
-                hit_stop = l[i] <= stop
-                hit_tgt = h[i] >= target
-            else:
-                hit_stop = h[i] >= stop
-                hit_tgt = l[i] <= target
-            if hit_stop:                      # pessimistic: stop wins ties
-                exit_price = stop
-            elif hit_tgt:
-                exit_price = target
+            side, entry, qty, risk_pts = pos["side"], pos["entry"], pos["qty"], pos["risk_pts"]
+            target, trail_dist = pos["target"], pos["trail_dist"]
+            pos["bars_held"] += 1
 
-            # EOD exit for intraday strategies (last bar of the session/day)
+            # update the trailing stop from the most favourable excursion
+            if np.isfinite(trail_dist):
+                if side == 1:
+                    pos["extreme"] = max(pos["extreme"], h[i])
+                    pos["stop"] = max(pos["stop"], _round_tick(pos["extreme"] - trail_dist))
+                else:
+                    pos["extreme"] = min(pos["extreme"], l[i])
+                    pos["stop"] = min(pos["stop"], _round_tick(pos["extreme"] + trail_dist))
+            stop = pos["stop"]
+
+            exit_price, reason = None, None
+            if side == 1:
+                hit_stop, hit_tgt = l[i] <= stop, h[i] >= target
+            else:
+                hit_stop, hit_tgt = h[i] >= stop, l[i] <= target
+            if hit_stop:                      # pessimistic: stop wins ties
+                exit_price, reason = stop, "stop"
+            elif hit_tgt:
+                exit_price, reason = target, "target"
+
+            max_hold = pos["max_hold"]
+            if exit_price is None and np.isfinite(max_hold) and pos["bars_held"] >= max_hold:
+                exit_price, reason = c[i], "time"
+
             eod = cfg.intraday and (i == n - 1 or day[i + 1] != day[i])
             if exit_price is None and eod:
-                exit_price = c[i]
+                exit_price, reason = c[i], "eod"
 
             if exit_price is not None:
                 fill = exit_price - side * slip          # slippage against us
@@ -113,8 +129,7 @@ def run(price: pd.DataFrame, signals: pd.DataFrame, cfg: BacktestConfig | None =
                     "entry_time": pos["entry_time"], "exit_time": idx[i],
                     "side": "long" if side == 1 else "short",
                     "entry": entry, "exit": fill, "qty": qty,
-                    "pnl": pnl, "R": R,
-                    "reason": "stop" if hit_stop else ("target" if hit_tgt else "eod"),
+                    "pnl": pnl, "R": R, "reason": reason,
                 })
                 eq_points.append((idx[i], equity))
                 in_pos = False
@@ -124,7 +139,7 @@ def run(price: pd.DataFrame, signals: pd.DataFrame, cfg: BacktestConfig | None =
             side = side_arr[i]
             stop_dist = stopd_arr[i]
             rr = rr_arr[i]
-            if side != 0 and np.isfinite(stop_dist) and stop_dist > 0 and np.isfinite(rr):
+            if side != 0 and np.isfinite(stop_dist) and stop_dist > 0:
                 if side < 0 and not cfg.allow_short:
                     continue
                 # don't open a brand-new intraday trade on the last bar of a day
@@ -132,17 +147,20 @@ def run(price: pd.DataFrame, signals: pd.DataFrame, cfg: BacktestConfig | None =
                     continue
                 entry = o[i + 1] + np.sign(side) * slip
                 stop = _round_tick(entry - side * stop_dist)
-                target = _round_tick(entry + side * rr * stop_dist)
                 risk_pts = abs(entry - stop)
                 if risk_pts <= 0:
                     continue
+                # target: fixed R-multiple, or "infinite" when riding a trail
+                target = (_round_tick(entry + side * rr * stop_dist)
+                          if np.isfinite(rr) else (np.inf if side == 1 else -np.inf))
                 risk_dollars = equity * cfg.risk_pct
                 qty = int(risk_dollars / (risk_pts * POINT_VALUE))
                 qty = max(1, min(qty, cfg.max_contracts))
                 pos = {
                     "side": int(side), "entry": entry, "stop": stop, "target": target,
-                    "qty": qty, "risk_pts": risk_pts,
-                    "entry_time": idx[i + 1],
+                    "qty": qty, "risk_pts": risk_pts, "entry_time": idx[i + 1],
+                    "trail_dist": trail_arr[i], "max_hold": hold_arr[i],
+                    "extreme": entry, "bars_held": 0,
                 }
                 in_pos = True
 

@@ -22,6 +22,11 @@ from . import signal as SG
 
 # Default, walk-forward-vetted configs per strategy.
 DEFAULTS = {
+    # Headline strategy: buy dips in an uptrend, ride with an ATR trail.
+    # Best monthly profile + best out-of-sample edge in this repo.
+    "trend_pullback": dict(interval="1d", intraday=False,
+                           params=dict(rsi_p=4, rsi_buy=35.0, stop_atr=3.0,
+                                       trail_atr=3.0, max_hold=40)),
     "donchian_trend": dict(interval="1d", intraday=False,
                            params=dict(period=55, atr_mult=2.5, rr=2.0, trend_filter=100)),
     "rsi_reversion":  dict(interval="1d", intraday=False,
@@ -31,6 +36,7 @@ DEFAULTS = {
     "vwap_reversion": dict(interval="15m", intraday=True,
                            params=dict(z_thresh=2.0, atr_mult=1.5, rr=1.0)),
 }
+DEFAULT_STRATEGY = "trend_pullback"
 
 
 def _load(interval, refresh):
@@ -51,6 +57,8 @@ def cmd_backtest(a):
     print(f"\n{a.strategy} | {d['interval']} | {len(price)} bars "
           f"({price.index[0].date()} -> {price.index[-1].date()})")
     print(st.pretty())
+    _, _, mp = M.monthly_report(tr, cfg.start_equity)
+    print("\n  -- monthly --\n" + mp)
     if a.trades and len(tr):
         print("\nlast 5 trades:\n", tr.tail().to_string(index=False))
 
@@ -63,12 +71,18 @@ def cmd_compare(a):
                                intraday=d["intraday"])
         tr, eq = B.run(price, sig, cfg)
         st = M.compute(tr, eq, cfg.start_equity)
+        _, ms, _ = M.monthly_report(tr, cfg.start_equity)
         print(f"\n### {name}  ({d['interval']}, {len(price)} bars)")
         print(st.pretty())
+        if ms:
+            print(f"  {'Positive months':<16}{ms['pct_positive_months']:.0f}%   "
+                  f"(monthly Sharpe {ms['monthly_sharpe']:.2f}, "
+                  f"{ms['avg_trades_per_month']:.1f} trades/mo)")
 
 
 def cmd_walkforward(a):
     grids = {
+        "trend_pullback": {"rsi_buy":[30,35],"stop_atr":[2.0,3.0],"trail_atr":[3.0,4.0,5.0]},
         "donchian_trend": {"period":[20,40,55],"atr_mult":[2.0,3.0],"rr":[2.0,3.0],"trend_filter":[100]},
         "rsi_reversion":  {"atr_mult":[2.0,3.0],"rr":[1.0,1.5,2.0],"low":[5.0,10.0],"trend_filter":[200]},
         "orb":            {"or_bars":[1,2],"rr":[1.0,2.0,3.0]},
@@ -86,7 +100,13 @@ def cmd_walkforward(a):
 
 def cmd_signal(a):
     d = DEFAULTS[a.strategy]
-    price = _load(a.interval or d["interval"], a.refresh)
+    interval = a.interval or d["interval"]
+    # For a daily read we want the freshest bar; try to refresh, fall back to cache.
+    try:
+        price = _load(interval, refresh=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"(could not refresh data: {e}; using cache)")
+        price = _load(interval, refresh=False)
     plan = SG.latest_signal(price, strategy=a.strategy, params=d["params"],
                             account=a.equity, risk_pct=a.risk)
     print("\n" + plan.pretty())
@@ -102,16 +122,18 @@ def main(argv=None):
     p = argparse.ArgumentParser(description="MNQ pattern trading toolkit", parents=[common])
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    b = sub.add_parser("backtest", parents=[common]); b.add_argument("--strategy", default="donchian_trend")
+    b = sub.add_parser("backtest", parents=[common]); b.add_argument("--strategy", default=DEFAULT_STRATEGY)
     b.add_argument("--interval"); b.add_argument("--trades", action="store_true"); b.set_defaults(func=cmd_backtest)
 
     c = sub.add_parser("compare", parents=[common]); c.set_defaults(func=cmd_compare)
 
-    w = sub.add_parser("walkforward", parents=[common]); w.add_argument("--strategy", default="donchian_trend")
+    w = sub.add_parser("walkforward", parents=[common]); w.add_argument("--strategy", default=DEFAULT_STRATEGY)
     w.add_argument("--interval"); w.add_argument("--folds", type=int, default=6); w.set_defaults(func=cmd_walkforward)
 
-    s = sub.add_parser("signal", parents=[common]); s.add_argument("--strategy", default="donchian_trend")
-    s.add_argument("--interval"); s.set_defaults(func=cmd_signal)
+    # `signal` and its alias `plan`: read today's data -> TP/SL plan.
+    for verb in ("signal", "plan"):
+        s = sub.add_parser(verb, parents=[common]); s.add_argument("--strategy", default=DEFAULT_STRATEGY)
+        s.add_argument("--interval"); s.set_defaults(func=cmd_signal)
 
     a = p.parse_args(argv)
     a.func(a)

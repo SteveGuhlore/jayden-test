@@ -157,6 +157,40 @@ ATR×3 stop, 2R target:
   sample and be nearly worthless out-of-sample. The full-sample result was
   substantially **curve-fit**.
 
+### 3c′. Trend pullback ("buy the dip in an uptrend, ride the trend") — the monthly workhorse ⭐
+This is the strategy built specifically for the goal of *monthly* profitability
+with ~weekly trade frequency. It fuses the two robust ideas above: the
+**long-bias / trend regime** of trend-following with the **high-hit-rate entry**
+of mean reversion, then exits with a **chandelier ATR trailing stop** so winners
+run (capturing the Nasdaq's upward drift) while losers are cut at a fixed ATR
+stop.
+
+- Regime: only long when close > 200-day SMA. Trigger: RSI(4) dips < 35 (a
+  pullback, not a crash). Stop: 3×ATR. Exit: 3×ATR trailing stop + 40-bar time
+  stop. No fixed target by default.
+- **My backtest (NQ daily, ~25 years):** win rate ~45%, expectancy **+0.24R**,
+  **profit factor 1.92**, **max drawdown −5.6%** (at 1% risk sizing), **monthly
+  Sharpe 0.70**, ~1.1 trades/month, **47% of months green** with the average
+  month positive and a strongly right-skewed distribution (best month dwarfs the
+  worst).
+- **Walk-forward (out-of-sample): expectancy +0.35R, profit factor 1.44** — the
+  best out-of-sample result of any strategy in this repo. Folds are lumpy
+  (a strong fold carries it), which is inherent to ~weekly trading on one
+  instrument.
+- **Robustness:** the entire parameter neighborhood (RSI 30–35, stop 2–3×ATR,
+  trail 3–5×ATR) stays profitable — the hallmark of a real edge rather than a
+  curve-fit.
+- **Fixed-target variant:** taking a fixed **3R** target instead of trailing
+  yields a **52% win rate, PF 1.69, 51% green months** — so the daily plan can
+  hand you a concrete take-profit number *and* offer the trailing option for
+  bigger runners. Both are backtest-validated.
+
+**Why this is the default.** It is the best compromise between the two edge
+roads, has the lowest drawdown, the best monthly Sharpe, the best out-of-sample
+expectancy, and a trade cadence (~1/week) that matches trading only the best
+setups. Caveat unchanged: the edge is real but modest, and OOS folds are lumpy —
+forward-test it.
+
 ### 3d. VWAP mean reversion — failed in this regime
 Fading stretches from session VWAP. Theory: price reverts to VWAP intraday
 ([MetroTrade](https://www.metrotrade.com/understanding-vwap-for-futures-trading/)).
@@ -232,17 +266,20 @@ This is the context for the humility throughout this document:
 ---
 
 ## 8. Bottom line & what I actually recommend
-1. **Trend-following (Donchian) is the most trustworthy edge here** — positive
-   *out-of-sample*, strongest academic backing, but lumpy and needs patience and
-   a ~$50k+ account for daily MNQ.
-2. **Mean-reversion (RSI-2) gives the high win rate you wanted** and is the more
-   psychologically comfortable system, but treat its full-sample numbers with
-   deep skepticism — forward-test it small.
-3. **ORB is theoretically the best intraday edge** but I could not validate it
-   on free data; it deserves a proper 5-min feed and paper-trading.
-4. **No guarantees exist.** Run everything on a **simulator/paper account for
-   months** before risking real money, size with ≤1% risk per trade, and accept
-   that the genuine edges are small. The framework in this repo is built so you
-   can keep testing honestly rather than fooling yourself.
+1. **`trend_pullback` is the default and my top pick for monthly profitability**
+   — best out-of-sample expectancy (+0.35R), highest profit factor (1.92),
+   lowest drawdown (−5.6%), best monthly Sharpe (0.70), and a ~1-trade/week
+   cadence that matches taking only the best setups. Use the fixed 3R target for
+   a clean TP, or trail to ride winners.
+2. **Trend-following (Donchian)** — also positive out-of-sample with the
+   strongest academic backing; lumpier and higher drawdown.
+3. **Mean-reversion (RSI-2) gives the highest win rate** and is psychologically
+   comfortable, but treat its full-sample numbers skeptically — forward-test small.
+4. **ORB is theoretically the best intraday edge** but I could not validate it on
+   free data; it deserves a proper 5-min feed and paper-trading.
+5. **No guarantees exist.** Run everything on a **simulator/paper account for
+   months** first. Mind the position-sizing reality (one daily MNQ contract risks
+   ~$3k); don't oversize. The genuine edges are small but real — the framework is
+   built so you keep testing honestly rather than fooling yourself.
 
 *Full source list is linked inline above.*

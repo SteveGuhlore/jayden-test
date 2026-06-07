@@ -10,56 +10,65 @@ a concrete trade plan with take-profit and stop-loss levels.**
 > advice. Futures can lose more than you put in. Paper-trade for months before
 > risking real money.
 
+## The daily workflow (what you asked for)
+Read MNQ's data for the day and get a take-profit + stop set for you:
+```bash
+python -m mnq.cli plan --equity 50000        # auto-pulls the latest bar
+```
+You get one of two things: **a concrete LONG plan** (entry, stop, take-profit,
+size, plus a "ride winners" trailing rule) or **"NO TRADE TODAY"**. The
+headline strategy is selective on purpose — about **1 trade per week** — because
+you said you'd rather wait for a good setup than force one daily.
+
 ## What it does
 - **Pulls real data** for `NQ=F` (same index as MNQ, 1/10th size) from Yahoo —
   25 yrs of daily, ~2 yrs hourly, ~60 days of 15-min — with caching + retry.
 - **Detects patterns**: ATR, VWAP, RSI, Donchian, relative volume, plus
   candlestick patterns (engulfing, pin bar, doji, wide-range) used as filters.
-- **Four strategies**, covering both roads to a positive edge:
-  | Strategy | Style | Edge road | OOS verdict |
+- **Five strategies.** The default is built for *monthly* profitability:
+  | Strategy | Style | Profile | OOS verdict |
   |---|---|---|---|
-  | `donchian_trend` | trend-following (daily) | **greater R:R** (~42% win, +0.26R) | ✅ survives walk-forward |
-  | `rsi_reversion` | mean-reversion (daily) | **positive win rate** (~60% win) | ⚠️ marginal OOS (overfit risk) |
+  | **`trend_pullback`** ⭐ | buy dips in an uptrend, ride with an ATR trail (daily) | **PF 1.92, max DD −5.6%, monthly Sharpe 0.70, ~1 trade/wk** | ✅ best OOS edge (+0.35R) |
+  | `rsi_reversion` | mean-reversion (daily) | high win rate, 51% green months | ⚠️ marginal OOS (overfit risk) |
+  | `donchian_trend` | breakout trend-following (daily) | greater R:R, lumpy | ✅ survives walk-forward |
   | `orb` | opening-range breakout (intraday) | momentum | ❓ too little free data to validate |
-  | `vwap_reversion` | intraday fade | mean-reversion | ❌ negative in this regime |
+  | `vwap_reversion` | intraday fade | — | ❌ negative in this regime |
 - **Backtests** with realistic MNQ economics ($2/pt), commission, slippage,
-  pessimistic stop-fills, risk-based sizing, and EOD exits for intraday.
-- **Walk-forward validates** to expose curve-fitting (this is what flagged
-  RSI-2 as overfit).
-- **Generates a live trade plan**: side, entry, **stop-loss, take-profit**, R:R,
-  contracts, and $ risk/reward — with a warning when a stop is too wide for your
-  account.
+  pessimistic stop-fills, risk-based sizing, **trailing stops + time stops**.
+- **Monthly report** (`% positive months`, best/worst month, monthly Sharpe) so
+  you optimize for the thing you actually care about.
+- **Walk-forward validates** to expose curve-fitting.
 
-## Quick start
+## Other commands
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-
-# Today's trade plan with TP & SL (trend system, robust OOS):
-python -m mnq.cli signal --strategy donchian_trend --equity 50000
-
-# High-win-rate mean-reversion plan:
-python -m mnq.cli signal --strategy rsi_reversion --equity 50000
-
-# Backtest one strategy / compare all / validate out-of-sample:
-python -m mnq.cli backtest --strategy donchian_trend
-python -m mnq.cli compare
-python -m mnq.cli walkforward --strategy donchian_trend
+python -m mnq.cli backtest --equity 50000          # default strategy, 25-yr stats + monthly
+python -m mnq.cli compare  --equity 50000          # all five strategies side by side
+python -m mnq.cli walkforward                       # out-of-sample validation
+python -m mnq.cli plan --strategy rsi_reversion     # try the high-win-rate variant
 ```
-Add `--refresh` to re-download data, `--risk 0.01` to set risk-per-trade.
+`--risk 0.01` sets risk-per-trade; `--refresh` forces a re-download.
 
-## Example output
+## Example plan output (a real past trigger)
 ```
-[2026-06-04] MNQ — LONG SIGNAL
-  Entry (ref) : 29,026.50
-  Stop loss   : 27,350.25   (1,676 pts risk)
-  Take profit : 31,029.00   (2,002 pts target)
-  Risk:Reward : 1 : 2.00
-  Size        : 1 MNQ contract(s)  (risk $3,352 / reward $4,004)
-  Note        : ** WARNING: 1 contract risks 34% of a $10,000 account ... **
+[2026-02-16] MNQ — 🟢 LONG
+  Entry (ref)  : 24,767.75
+  STOP LOSS    : 23,245.00   (1,523 pts  =  $3,046 on 1 ctr)
+  TAKE PROFIT  : 29,336.00   (4,568 pts  =  $9,136)   [1 : 3.0 R]
+  RIDE WINNERS : optional — instead of the fixed TP, trail the stop 1,523 pts
+                 below the highest high since entry (backtests favor this).
+  Time stop    : exit after ~40 bars if neither level hit.
+  ** WARNING: 1 contract risks $3,046 (6% of $50,000) ... **
 ```
-That warning is a feature: daily NQ stops are wide, so daily swing trading MNQ
-realistically needs ~$50k+ — otherwise use a tighter intraday strategy.
+
+## Position sizing reality (important)
+On the **daily** timeframe, NQ's ATR is large, so a 3×ATR stop is ~1,500 index
+points = **~$3,000 risk per single MNQ contract**. That means:
+- True 1%-risk sizing needs a big account (~$300k for 1 contract). The tool
+  **warns you** whenever a stop is wider than your risk budget.
+- Realistically: trade ~1 MNQ contract per ~$50k and accept ~5–6% risk per
+  trade, **or** scale the account up, **or** use a tighter intraday setup.
+- To chase higher returns, raise `--risk` — but drawdown scales with it. Don't
+  oversize; that is how the 90% blow up.
 
 ## Layout
 ```
@@ -67,9 +76,9 @@ mnq/
   data.py         # download + cache NQ=F (retry/backoff), RTH session filter
   indicators.py   # ATR, VWAP, RSI, EMA/SMA, Donchian, relative volume, z-score
   patterns.py     # candlestick patterns (confluence filters only)
-  strategies.py   # orb, vwap_reversion, donchian_trend, rsi_reversion
-  backtest.py     # event-driven, no-lookahead, MNQ economics, costs, sizing
-  metrics.py      # win rate, expectancy(R), profit factor, Sharpe, max DD
+  strategies.py   # trend_pullback ⭐, rsi_reversion, donchian_trend, orb, vwap_reversion
+  backtest.py     # event-driven, no-lookahead, MNQ economics, costs, trailing/time stops
+  metrics.py      # win rate, expectancy(R), profit factor, Sharpe, max DD, monthly report
   walkforward.py  # out-of-sample validation (anti-overfitting)
   signal.py       # live trade plan: entry / stop / target / size
   cli.py          # command-line entry point

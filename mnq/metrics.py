@@ -46,6 +46,48 @@ class Stats:
         return "\n".join(f"  {label:<16}{fmt.format(d[key])}" for key, label, fmt in order)
 
 
+def monthly_report(trades: pd.DataFrame, start_equity: float):
+    """Aggregate realized P&L by calendar month -> (table, summary, pretty).
+
+    This is the lens that matters for 'profitable on the monthly': it shows
+    how many months were green, the worst month, and month-to-month
+    consistency rather than just per-trade stats.
+    """
+    if trades is None or len(trades) == 0:
+        return pd.DataFrame(), {}, "  (no trades)"
+    t = trades.copy()
+    t["month"] = pd.to_datetime(t["exit_time"]).dt.tz_localize(None).dt.to_period("M")
+    t["win"] = (t["pnl"] > 0).astype(int)
+    table = t.groupby("month").agg(
+        pnl=("pnl", "sum"), trades=("pnl", "size"), wins=("win", "sum")
+    )
+    table["ret_pct"] = 100 * table["pnl"] / start_equity
+    pnl = table["pnl"].to_numpy(float)
+    pos = pnl > 0
+    summary = {
+        "months_traded": int(len(table)),
+        "pct_positive_months": float(100 * pos.mean()),
+        "avg_month": float(pnl.mean()),
+        "median_month": float(np.median(pnl)),
+        "best_month": float(pnl.max()),
+        "worst_month": float(pnl.min()),
+        "std_month": float(pnl.std(ddof=1)) if len(pnl) > 1 else 0.0,
+        "monthly_sharpe": float(pnl.mean() / pnl.std(ddof=1) * np.sqrt(12))
+        if len(pnl) > 1 and pnl.std(ddof=1) > 0 else 0.0,
+        "avg_trades_per_month": float(table["trades"].mean()),
+    }
+    pretty = "\n".join([
+        f"  Months traded     {summary['months_traded']}",
+        f"  Positive months   {summary['pct_positive_months']:.0f}%",
+        f"  Avg month         ${summary['avg_month']:,.0f}",
+        f"  Median month      ${summary['median_month']:,.0f}",
+        f"  Best / Worst      ${summary['best_month']:,.0f} / ${summary['worst_month']:,.0f}",
+        f"  Monthly Sharpe    {summary['monthly_sharpe']:.2f}",
+        f"  Trades / month    {summary['avg_trades_per_month']:.1f}",
+    ])
+    return table, summary, pretty
+
+
 def compute(trades: pd.DataFrame, equity: pd.Series, start_equity: float,
             periods_per_year: int = 252) -> Stats:
     """trades: DataFrame with columns pnl (dollars) and R (reward multiple)."""

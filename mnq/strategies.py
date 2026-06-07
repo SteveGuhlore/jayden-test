@@ -20,7 +20,9 @@ from . import patterns as pat
 
 def _empty(index) -> pd.DataFrame:
     return pd.DataFrame(
-        {"side": 0.0, "stop_dist": np.nan, "rr": np.nan}, index=index
+        {"side": 0.0, "stop_dist": np.nan, "rr": np.nan,
+         "trail_dist": np.nan, "max_hold": np.nan},
+        index=index,
     )
 
 
@@ -156,9 +158,64 @@ def rsi_reversion(df: pd.DataFrame, period: int = 2, low: float = 10.0,
     return out
 
 
+# --------------------------------------------------------------------------
+# 5) Trend pullback (THE monthly-consistency workhorse, daily bars, long-biased)
+# --------------------------------------------------------------------------
+def trend_pullback(df: pd.DataFrame, sma_trend: int = 200, rsi_p: int = 4,
+                   rsi_buy: float = 30.0, atr_period: int = 14,
+                   stop_atr: float = 2.5, trail_atr: float = 4.0,
+                   rr: float = float("nan"), max_hold: int = 40,
+                   pattern_filter: bool = True,
+                   allow_short: bool = False) -> pd.DataFrame:
+    """Buy dips inside an established up-trend, then ride the trend out with a
+    chandelier-style ATR trailing stop. This is the strategy aimed at your
+    goal: few, high-quality trades (~weekly) that try to make MONTHS green by
+    cutting losers fast and letting winners run.
+
+    Logic (long):
+      * Regime  : close > ``sma_trend``  (only trade with the primary trend).
+      * Trigger : short-period RSI dips below ``rsi_buy`` (a pullback).
+      * Confirm : optional bullish candle / not-falling-knife filter.
+      * Stop    : ``stop_atr`` x ATR below entry (initial risk).
+      * Exit    : ``trail_atr`` x ATR chandelier trail (no fixed target) plus a
+                  ``max_hold`` time stop. Letting the trail run is what captures
+                  the Nasdaq's upward drift.
+    """
+    out = _empty(df.index)
+    sma = ind.sma(df["close"], sma_trend)
+    r = ind.rsi(df["close"], rsi_p)
+    a = ind.atr(df, atr_period)
+
+    uptrend = df["close"] > sma
+    dip = r <= rsi_buy
+    long_sig = uptrend & dip
+    if pattern_filter:
+        # avoid the worst falling knives: require the bar not to be a big down bar
+        not_knife = df["close"] >= df["open"] * 0.997
+        long_sig = long_sig & not_knife
+    out.loc[long_sig, "side"] = 1
+
+    if allow_short:
+        downtrend = df["close"] < sma
+        rally = r >= (100 - rsi_buy)
+        short_sig = downtrend & rally
+        out.loc[short_sig, "side"] = -1
+
+    sel = out["side"] != 0
+    out.loc[sel, "stop_dist"] = stop_atr * a
+    out.loc[sel, "max_hold"] = max_hold
+    if np.isfinite(rr):
+        out.loc[sel, "rr"] = rr           # fixed-target variant
+    else:
+        out.loc[sel, "trail_dist"] = trail_atr * a   # ride the ATR trail
+        out.loc[sel, "rr"] = np.nan
+    return out
+
+
 REGISTRY = {
     "orb": orb,
     "vwap_reversion": vwap_reversion,
     "donchian_trend": donchian_trend,
     "rsi_reversion": rsi_reversion,
+    "trend_pullback": trend_pullback,
 }
